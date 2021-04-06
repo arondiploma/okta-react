@@ -11,18 +11,14 @@
  */
 
 import * as React from 'react';
-import { useOktaAuth, OnAuthRequiredFunction } from './OktaContext';
-import { Route, useRouteMatch, RouteProps } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
+import { useOktaAuth } from './OktaContext';
 
-const SecureRoute: React.FC<{
-  onAuthRequired?: OnAuthRequiredFunction;
-} & RouteProps & React.HTMLAttributes<HTMLDivElement>> = ({ 
-  onAuthRequired, 
-  ...routeProps 
-}) => { 
+const RouteGuard: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ children }) => {
   const { oktaAuth, authState, _onAuthRequired } = useOktaAuth();
-  const match = useRouteMatch(routeProps);
+  const location = useLocation();
   const pendingLogin = React.useRef(false);
+  const [requestedLocation, setRequestedLocation] = React.useState(null);
 
   React.useEffect(() => {
     const handleLogin = async () => {
@@ -31,20 +27,10 @@ const SecureRoute: React.FC<{
       }
 
       pendingLogin.current = true;
-
       oktaAuth.setOriginalUri();
-      const onAuthRequiredFn = onAuthRequired || _onAuthRequired;
-      if (onAuthRequiredFn) {
-        await onAuthRequiredFn(oktaAuth);
-      } else {
-        await oktaAuth.signInWithRedirect();
-      }
-    };
 
-    // Only process logic if the route matches
-    if (!match) {
-      return;
-    }
+      await oktaAuth.signInWithRedirect();
+    };
 
     if (authState.isAuthenticated) {
       pendingLogin.current = false;
@@ -52,28 +38,27 @@ const SecureRoute: React.FC<{
     }
 
     // Start login if app has decided it is not logged in and there is no pending signin
-    if(!authState.isAuthenticated && !authState.isPending) { 
+    if (!authState.isAuthenticated && !authState.isPending) {
       handleLogin();
-    }  
-
-  }, [
-    authState.isPending, 
-    authState.isAuthenticated, 
-    oktaAuth, 
-    match, 
-    onAuthRequired, 
-    _onAuthRequired
-  ]);
+    }
+  }, [authState.isPending, authState.isAuthenticated, oktaAuth, _onAuthRequired]);
 
   if (!authState.isAuthenticated) {
+    if (location.pathname !== requestedLocation) {
+      setRequestedLocation(location.pathname);
+    }
     return null;
   }
 
-  return (
-    <Route
-      { ...routeProps }
-    />
-  );
+  // This is done so that in case the route changes by any chance through other
+  // means between the moment of request and the render we navigate to the initially
+  // requested route.
+  if (requestedLocation && location.pathname !== requestedLocation) {
+    setRequestedLocation(null);
+    return <Navigate to={requestedLocation} />;
+  }
+
+  return <>{children}</>;
 };
 
-export default SecureRoute;
+export default RouteGuard;
